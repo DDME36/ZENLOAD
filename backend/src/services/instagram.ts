@@ -211,20 +211,34 @@ export async function getInstagramInfo(
 
   log('info', `Instagram: processing profile @${cleanUsername}`)
 
-  // Method 1: Direct Web HTML Navigation (ส่ง Header เสมือนเปิดผ่าน Google Chrome บน Windows 100%)
+  // Method 1: gallery-dl Avatar Extractor (ดึงรูปโปรไฟล์ Full HD 1080x1080 แท้จาก Instagram API / GraphQL)
   try {
-    const igCookie = await getInstagramCookieHeader()
-    const navHeaders: Record<string, string> = {
-      ...DESKTOP_CHROME_HEADERS,
-      ...(igCookie ? { 'Cookie': igCookie } : {}),
+    const gdlResult = await getInstagramAvatarViaGalleryDl(cleanUsername, signal)
+    if (gdlResult && gdlResult.profilePicUrl) {
+      log('info', `Instagram: extracted real native 1080p profile avatar via gallery-dl successfully: ${gdlResult.resolution}`)
+      profilePicUrl = gdlResult.profilePicUrl
+      displayName = gdlResult.displayName
+      resolution = gdlResult.resolution
     }
+  } catch (err) {
+    log('warn', `Instagram: gallery-dl avatar extraction attempt failed: ${(err as Error).message}`)
+  }
 
-    const resp = await safeFetch(`https://www.instagram.com/${cleanUsername}/`, {
-      headers: navHeaders,
-      signal,
-    })
+  // Method 2: Direct Web HTML Navigation (ส่ง Header เสมือนเปิดผ่าน Google Chrome บน Windows 100%)
+  if (!profilePicUrl) {
+    try {
+      const igCookie = await getInstagramCookieHeader()
+      const navHeaders: Record<string, string> = {
+        ...DESKTOP_CHROME_HEADERS,
+        ...(igCookie ? { 'Cookie': igCookie } : {}),
+      }
 
-    log('info', 'Instagram: profile HTML navigation response', { status: resp.status, cookiePresent: !!igCookie })
+      const resp = await safeFetch(`https://www.instagram.com/${cleanUsername}/`, {
+        headers: navHeaders,
+        signal,
+      })
+
+      log('info', 'Instagram: profile HTML navigation response', { status: resp.status, cookiePresent: !!igCookie })
 
     if (resp.ok) {
       const html = await resp.text()
@@ -330,12 +344,13 @@ export async function getInstagramInfo(
           'หยุดลองซ้ำชั่วคราว แล้วตรวจ session และเส้นทางเครือข่ายบนเซิร์ฟเวอร์ ข้อความนี้ไม่ได้หมายความว่าบัญชีเป็น Private')
       }
     }
-  } catch (e) {
-    if (e instanceof AppError) upstreamError = e
-    else log('warn', `Instagram: HTML navigation failed -> ${(e as Error).message}`)
+    } catch (e) {
+      if (e instanceof AppError) upstreamError = e
+      else log('warn', `Instagram: HTML navigation failed -> ${(e as Error).message}`)
+    }
   }
 
-  // Method 2: web_profile_info API (Fallback)
+  // Method 3: web_profile_info API (Fallback)
   if (!profilePicUrl) {
     try {
       const igCookie = await getInstagramCookieHeader()
@@ -404,21 +419,6 @@ export async function getInstagramInfo(
     } catch (e) {
       if (e instanceof AppError) upstreamError = e
       else log('warn', `Instagram: web_profile_info API failed -> ${(e as Error).message}`)
-    }
-  }
-
-  // Method 3: gallery-dl Avatar Extractor (Fallback)
-  if (!profilePicUrl) {
-    try {
-      const gdlResult = await getInstagramAvatarViaGalleryDl(cleanUsername, signal)
-      if (gdlResult && gdlResult.profilePicUrl) {
-        log('info', `Instagram: extracted profile avatar via gallery-dl successfully`)
-        profilePicUrl = gdlResult.profilePicUrl
-        displayName = gdlResult.displayName
-        resolution = gdlResult.resolution
-      }
-    } catch (err) {
-      log('warn', `Instagram: gallery-dl avatar extraction attempt failed: ${(err as Error).message}`)
     }
   }
 

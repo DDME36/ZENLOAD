@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, memo } from 'react'
-import { Archive, Download, Image as ImageIcon, Video, ChevronLeft, ChevronRight, Loader2, Music } from 'lucide-react'
+import { Archive, Download, Image as ImageIcon, Video, ChevronLeft, ChevronRight, Loader2, Music, Maximize2, X } from 'lucide-react'
 import { resolveBackendUrl } from '../services/api'
 import DownloadProgressPanel from './DownloadProgressPanel'
 
@@ -24,6 +24,7 @@ function AlbumGallery({
   onNewSearch,
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
 
   const handlePrev = useCallback(() => {
     setSelectedIndex((prev) => (prev > 0 ? prev - 1 : items.length - 1))
@@ -38,7 +39,9 @@ function AlbumGallery({
     const handleKeyDown = (e) => {
       if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
 
-      if (e.key === 'ArrowLeft') {
+      if (e.key === 'Escape') {
+        setLightboxOpen(false)
+      } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
         handlePrev()
       } else if (e.key === 'ArrowRight') {
@@ -128,13 +131,27 @@ function AlbumGallery({
               </div>
             </div>
           ) : selectedItem.thumbnail || selectedItem.url ? (
-            <img
-              src={resolveBackendUrl(selectedItem.thumbnail || selectedItem.url)}
-              alt={selectedItem.title || `Item #${selectedIndex + 1}`}
-              className="album-gallery__main-img"
-              loading="lazy"
-              referrerPolicy="no-referrer"
-            />
+            <div className="album-gallery__img-container">
+              <img
+                src={resolveBackendUrl(selectedItem.thumbnail || selectedItem.url)}
+                alt={selectedItem.title || `Item #${selectedIndex + 1}`}
+                className="album-gallery__main-img"
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                onClick={() => setLightboxOpen(true)}
+                title="คลิกเพื่อขยายดูรูปภาพขนาดเต็ม"
+              />
+              <button
+                type="button"
+                className="album-gallery__zoom-trigger"
+                onClick={() => setLightboxOpen(true)}
+                title="ขยายดูรูปภาพขนาดเต็ม"
+                aria-label="ขยายดูรูปภาพขนาดเต็ม"
+              >
+                <Maximize2 size={13} />
+                <span>ขยายรูป</span>
+              </button>
+            </div>
           ) : (
             <div className="album-gallery__placeholder">
               {isSelectedVideo ? <Video size={48} /> : <ImageIcon size={48} />}
@@ -226,6 +243,74 @@ function AlbumGallery({
           </button>
         ))}
       </div>
+
+      {/* Lightbox Fullscreen Image Preview */}
+      {lightboxOpen && (
+        <div
+          className="album-lightbox animate-fade-in"
+          onClick={() => setLightboxOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="ขยายดูรูปภาพ"
+        >
+          <div className="album-lightbox__dialog" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="album-lightbox__close"
+              onClick={() => setLightboxOpen(false)}
+              aria-label="ปิดโหมดขยายรูป"
+            >
+              <X size={22} />
+            </button>
+
+            <div className="album-lightbox__bar">
+              <span className="album-lightbox__indicator">
+                {selectedIndex + 1} / {items.length}
+              </span>
+              <span className="album-lightbox__title">{selectedItem.title || title || 'รูปภาพ'}</span>
+            </div>
+
+            <div className="album-lightbox__viewport">
+              <img
+                src={resolveBackendUrl(selectedItem.thumbnail || selectedItem.url)}
+                alt={selectedItem.title || `Item #${selectedIndex + 1}`}
+                className="album-lightbox__img"
+              />
+            </div>
+
+            <div className="album-lightbox__bottom">
+              <button
+                type="button"
+                className="album-lightbox__arrow"
+                onClick={handlePrev}
+                aria-label="รูปก่อนหน้า"
+              >
+                <ChevronLeft size={22} />
+              </button>
+
+              <button
+                type="button"
+                className="dl-btn dl-btn--primary dl-btn--sm"
+                onClick={() => {
+                  onDownloadItem(selectedItem, selectedIndex)
+                  setLightboxOpen(false)
+                }}
+              >
+                <Download size={14} /> ดาวน์โหลดรูปนี้
+              </button>
+
+              <button
+                type="button"
+                className="album-lightbox__arrow"
+                onClick={handleNext}
+                aria-label="รูปถัดไป"
+              >
+                <ChevronRight size={22} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

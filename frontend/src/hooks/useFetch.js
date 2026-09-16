@@ -17,6 +17,15 @@ export function useFetch() {
       abortControllerRef.current.abort()
     }
 
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setError({
+        message: 'สัญญาณอินเทอร์เน็ตขาดหาย กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่อีกครั้ง',
+        code: 'OFFLINE',
+        suggestion: 'กรุณาตรวจสอบการเชื่อมต่อ Wi-Fi หรือข้อมูลมือถือของอุปกรณ์',
+      })
+      return
+    }
+
     const controller = new AbortController()
     abortControllerRef.current = controller
 
@@ -33,11 +42,18 @@ export function useFetch() {
         return
       }
 
-      // แยก error message สำหรับ cold start
+      // แยก error message สำหรับ cold start หรือ offline
       let message = err.message || 'เกิดข้อผิดพลาดที่ไม่คาดคิด'
       let suggestion = err.suggestion || null
-      
-      if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
+      let code = err.code || 'UNKNOWN'
+
+      const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false
+
+      if (isOffline) {
+        code = 'OFFLINE'
+        message = 'สัญญาณอินเทอร์เน็ตขาดหาย'
+        suggestion = 'กรุณาตรวจสอบการเชื่อมต่อ Wi-Fi หรือข้อมูลมือถือของอุปกรณ์'
+      } else if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
         message = 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้'
         suggestion = 'เซิร์ฟเวอร์อาจกำลัง cold start (รอ 30 วินาที) หรือตรวจสอบการเชื่อมต่ออินเทอร์เน็ต'
       } else if (err.message?.includes('timeout') || err.message?.includes('timed out')) {
@@ -47,7 +63,7 @@ export function useFetch() {
 
       setError({
         message,
-        code: err.code || 'UNKNOWN',
+        code,
         suggestion,
       })
     } finally {

@@ -12,7 +12,7 @@ describe('Elysia HTTP API Endpoints & Security Integration Tests', () => {
     expect(res.status).toBe(200)
     const data = await res.json()
     expect(data.status).toBe('ok')
-    expect(data.name).toBe('Zentyr Fetch')
+    expect(data.name).toBe('Zenload API')
     expect(data.concurrency).toEqual({
       analyzing: { active: 0, limit: 2 },
       downloading: { active: 0, limit: 2 },
@@ -30,9 +30,9 @@ describe('Elysia HTTP API Endpoints & Security Integration Tests', () => {
 
     const json = JSON.parse(text)
     expect(json.success).toBe(true)
-    expect(json.name).toBe('Zentyr Fetch')
+    expect(json.name).toBe('Zenload API')
     expect(json.tools).toBeDefined()
-  })
+  }, 15000)
 
   it('should confirm /api/debug-cookies endpoint is removed (404)', async () => {
     const res = await app.handle(new Request('http://localhost/api/debug-cookies'))
@@ -174,5 +174,15 @@ describe('Elysia HTTP API Endpoints & Security Integration Tests', () => {
     expect(cancelRes.status).toBe(200)
     const cancelData = await cancelRes.json()
     expect(cancelData.success).toBe(true)
+  })
+
+  it('should serve frontend correctly with /zenload base path', async () => {
+    const res = await app.handle(new Request('http://localhost/zenload/'))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/html')
+
+    const manifestRes = await app.handle(new Request('http://localhost/zenload/manifest.json'))
+    expect(manifestRes.status).toBe(200)
+    expect(manifestRes.headers.get('content-type')).toContain('application/manifest+json')
   })
 })

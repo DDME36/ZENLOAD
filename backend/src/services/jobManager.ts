@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { DownloadStage } from '../types'
 import { AppError } from '../utils/errors'
 import { log, getTempDir, ensureDataDir } from '../utils/helpers'
-import { killProcessTree, cleanupPartialFiles } from '../utils/process'
+import { cleanupPartialFiles } from '../utils/process'
 
 export interface JobRecord {
   id: string
@@ -28,9 +28,8 @@ export interface JobRecord {
 
 let db: Database
 
-// เก็บ Controller และ Subprocess สำหรับการ Cancel แบบ Real-time
+// เก็บ Controller สำหรับการ Cancel แบบ Real-time
 const activeControllers = new Map<string, AbortController>()
-const activeProcesses = new Map<string, { pid: number; kill: (sig?: any) => void; exited?: Promise<number> }>()
 
 /**
  * โฟลเดอร์แยกสำหรับแต่ละงาน (Per-job directory)
@@ -242,7 +241,6 @@ export function completeJob(
   fileSize: number
 ): void {
   activeControllers.delete(jobId)
-  activeProcesses.delete(jobId)
 
   const now = Date.now()
   const expiresAt = now + 1800000 // 30 นาที สำหรับดาวน์โหลด / โหลดซ้ำ / resume
@@ -269,7 +267,6 @@ export function completeJob(
  */
 export function failJob(jobId: string, error: string): void {
   activeControllers.delete(jobId)
-  activeProcesses.delete(jobId)
 
   const stmt = db.prepare(`
     UPDATE jobs 
@@ -280,36 +277,29 @@ export function failJob(jobId: string, error: string): void {
 }
 
 /**
- * ยกเลิกงาน (Abort) พร้อมสั่ง kill subprocess tree (รอผลจริง) และลบโฟลเดอร์งานทันที
+ * ยกเลิกงาน (Abort) พร้อมส่งสัญญาณยกเลิกไปยัง AbortController และลบโฟลเดอร์งานทันที
  */
 export async function abortJob(jobId: string): Promise<void> {
   const job = getJob(jobId)
   if (!job) return
 
-  // 1. สั่ง abort controller
+  // 1. สั่ง abort controller (ซึ่งจะส่งสัญญาณยุติการทำงานไปยัง Process Tree)
   const controller = activeControllers.get(jobId)
   if (controller) {
     controller.abort()
     activeControllers.delete(jobId)
   }
 
-  // 2. สั่งฆ่า Subprocess Tree และ await ให้กระบวนการยุติอย่างแท้จริง
-  const proc = activeProcesses.get(jobId)
-  if (proc) {
-    await killProcessTree(proc)
-    activeProcesses.delete(jobId)
-  }
-
-  // 3. ลบโฟลเดอร์ของ Job นี้ทิ้งอย่างสมบูรณ์
+  // 2. ลบโฟลเดอร์ของ Job นี้ทิ้งอย่างสมบูรณ์
   await removeJobDir(jobId)
 
-  // 4. ลบไฟล์ที่เกี่ยวข้อง (ถ้ามีระบุไว้)
+  // 3. ลบไฟล์ที่เกี่ยวข้อง (ถ้ามีระบุไว้)
   if (job.file_path) {
     await cleanupPartialFiles(job.file_path)
     try { await unlink(job.file_path) } catch {}
   }
 
-  // 5. บันทึกสถานะว่า aborted
+  // 4. บันทึกสถานะว่า aborted
   const stmt = db.prepare(`
     UPDATE jobs 
     SET status = 'aborted', updated_at = ? 
@@ -317,24 +307,6 @@ export async function abortJob(jobId: string): Promise<void> {
   `)
   stmt.run(Date.now(), jobId)
   log('info', `Job ${jobId} successfully aborted and cleaned.`)
-}
-
-/**
- * แนบ subprocess เข้ากับ Job
- */
-export function attachProcess(jobId: string, proc: { pid: number; kill: (sig?: any) => void; exited?: Promise<number> }): void {
-  activeProcesses.set(jobId, proc)
-}
-
-/**
- * ปลด subprocess ออกจาก Job
- */
-export function detachProcess(jobId: string): void {
-  activeProcesses.delete(jobId)
-}
-
-export function getAbortSignal(jobId: string): AbortSignal | undefined {
-  return activeControllers.get(jobId)?.signal
 }
 
 /**

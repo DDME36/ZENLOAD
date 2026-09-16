@@ -1,14 +1,15 @@
 #!/bin/bash
-# สคริปต์สำหรับอัปเดต yt-dlp บน production server
-# ใช้เมื่อต้องการอัปเดตโดยไม่ต้อง rebuild Docker image
+# สคริปต์สำหรับอัปเดต yt-dlp และ gallery-dl บน Ubuntu Production Server
+set -e
 
-echo "🔄 Updating yt-dlp..."
+echo "🔄 Updating yt-dlp, yt-dlp-ejs, and gallery-dl..."
 
-# อัปเดต yt-dlp
-pip3 install --break-system-packages --upgrade yt-dlp
+# อัปเดตแพ็กเกจด้วย pip3
+pip3 install --break-system-packages --upgrade yt-dlp yt-dlp-ejs gallery-dl
 
 # แสดงเวอร์ชันปัจจุบัน
-echo "✅ yt-dlp version:"
-yt-dlp --version
+echo "✅ yt-dlp version: $(yt-dlp --version)"
+echo "✅ gallery-dl version: $(gallery-dl --version)"
 
-echo "✅ Update complete!"
+echo "✅ Downloader tools update complete!"
+

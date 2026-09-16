@@ -210,33 +210,43 @@ export const app = new Elysia()
 
   // ===== ปิด Cookie Leak และแสดงเฉพาะ System Status ปลอดภัย =====
   .get('/api/system/status', async () => {
-    let ytdlpOk = false
-    try {
-      const proc = Bun.spawn(['yt-dlp', '--version'], { stdout: 'ignore', stderr: 'ignore' })
-      ytdlpOk = (await proc.exited) === 0
-    } catch {}
-
-    let denoOk = false
-    try {
-      const proc = Bun.spawn(['deno', '--version'], { stdout: 'ignore', stderr: 'ignore' })
-      denoOk = (await proc.exited) === 0
-    } catch {}
-
-    let ffmpegOk = false
-    try {
-      const proc = Bun.spawn(['ffmpeg', '-version'], { stdout: 'ignore', stderr: 'ignore' })
-      ffmpegOk = (await proc.exited) === 0
-    } catch {}
+    const [ytdlpOk, denoOk, ffmpegOk, galleryDlOk] = await Promise.all([
+      (async () => {
+        try {
+          const proc = Bun.spawn(['yt-dlp', '--version'], { stdout: 'ignore', stderr: 'ignore' })
+          return (await proc.exited) === 0
+        } catch {
+          return false
+        }
+      })(),
+      (async () => {
+        try {
+          const proc = Bun.spawn(['deno', '--version'], { stdout: 'ignore', stderr: 'ignore' })
+          return (await proc.exited) === 0
+        } catch {
+          return false
+        }
+      })(),
+      (async () => {
+        try {
+          const proc = Bun.spawn(['ffmpeg', '-version'], { stdout: 'ignore', stderr: 'ignore' })
+          return (await proc.exited) === 0
+        } catch {
+          return false
+        }
+      })(),
+      checkGalleryDl(),
+    ])
 
     return {
       success: true,
-      name: 'Zentyr Fetch',
+      name: 'Zenload API',
       status: 'ok',
       tools: {
         ytDlp: ytdlpOk,
         deno: denoOk,
         ffmpeg: ffmpegOk,
-        galleryDl: await checkGalleryDl(),
+        galleryDl: galleryDlOk,
       },
       concurrency: {
         analyzing: { active: analyzeCapacity.getActiveCount(), limit: analyzeCapacity.getLimit() },
@@ -674,18 +684,37 @@ if (process.env.NODE_ENV === 'production' || distExists) {
       return { error: 'API endpoint not found' }
     }
 
-    const cleanPath = path === '/' ? 'index.html' : path.replace(/^\//, '')
+    let cleanPath = path
+    if (cleanPath === '/zenload' || cleanPath === '/zenload/') {
+      cleanPath = 'index.html'
+    } else if (cleanPath.startsWith('/zenload/')) {
+      cleanPath = cleanPath.slice('/zenload/'.length)
+    } else if (cleanPath === '/') {
+      cleanPath = 'index.html'
+    } else {
+      cleanPath = cleanPath.replace(/^\//, '')
+    }
+
     const filePath = join(frontendDistPath, cleanPath)
     const file = Bun.file(filePath)
 
     if (await file.exists()) {
-      if (cleanPath.endsWith('.js')) set.headers['content-type'] = 'application/javascript'
-      else if (cleanPath.endsWith('.css')) set.headers['content-type'] = 'text/css'
+      if (cleanPath.endsWith('.js')) set.headers['content-type'] = 'application/javascript; charset=utf-8'
+      else if (cleanPath.endsWith('.css')) set.headers['content-type'] = 'text/css; charset=utf-8'
       else if (cleanPath.endsWith('.png')) set.headers['content-type'] = 'image/png'
       else if (cleanPath.endsWith('.jpg') || cleanPath.endsWith('.jpeg')) set.headers['content-type'] = 'image/jpeg'
       else if (cleanPath.endsWith('.svg')) set.headers['content-type'] = 'image/svg+xml'
       else if (cleanPath.endsWith('.ico')) set.headers['content-type'] = 'image/x-icon'
       else if (cleanPath.endsWith('.json') || cleanPath.endsWith('.webmanifest')) set.headers['content-type'] = 'application/manifest+json'
+      else if (cleanPath.endsWith('.woff2')) set.headers['content-type'] = 'font/woff2'
+      else if (cleanPath.endsWith('.woff')) set.headers['content-type'] = 'font/woff'
+      else if (cleanPath.endsWith('.html')) set.headers['content-type'] = 'text/html; charset=utf-8'
+
+      if (cleanPath.startsWith('assets/') || cleanPath.startsWith('fonts/')) {
+        set.headers['cache-control'] = 'public, max-age=31536000, immutable'
+      } else {
+        set.headers['cache-control'] = 'public, max-age=3600'
+      }
 
       return file
     }
@@ -696,7 +725,8 @@ if (process.env.NODE_ENV === 'production' || distExists) {
       return 'Frontend not built'
     }
 
-    set.headers['content-type'] = 'text/html'
+    set.headers['content-type'] = 'text/html; charset=utf-8'
+    set.headers['cache-control'] = 'no-cache'
     return indexFile
   })
 }
@@ -708,7 +738,7 @@ await checkGalleryDl()
 
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT)
-  log('info', `🦊 Zentyr Fetch Backend running at http://localhost:${PORT}`)
+  log('info', `🦊 Zenload API Backend running at http://localhost:${PORT}`)
   if (process.env.NODE_ENV === 'production' || distExists) {
     log('info', `📦 Serving frontend from ${frontendDistPath}`)
   }

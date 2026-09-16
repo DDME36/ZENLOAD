@@ -29,19 +29,3 @@ export function isStandalone() {
 export function isIOSPWA() {
   return isIOS() && isStandalone()
 }
-
-/**
- * ตรวจสอบว่าเบราว์เซอร์รองรับการแชร์ไฟล์ผ่าน Web Share API หรือไม่
- */
-export function canShareFiles(file) {
-  if (typeof navigator === 'undefined' || !navigator.canShare) return false
-  try {
-    if (file) {
-      return navigator.canShare({ files: [file] })
-    }
-    const testFile = new File([''], 'test.png', { type: 'image/png' })
-    return navigator.canShare({ files: [testFile] })
-  } catch {
-    return false
-  }
-}

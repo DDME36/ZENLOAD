@@ -17,17 +17,6 @@ export async function ensureLogsDir(): Promise<string> {
   return logsDir
 }
 
-export function getLogFilePath(): string {
-  return logFilePath
-}
-
-export function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`
-  return `${(bytes / 1073741824).toFixed(2)} GB`
-}
-
 export function sanitizeFilename(name: string): string {
   const sanitized = name
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')
@@ -87,23 +76,6 @@ export function log(level: 'info' | 'warn' | 'error', message: string, meta?: Re
   ensureLogsDir().then(() => {
     appendFile(logFilePath, logLine, 'utf-8').catch(() => {})
   }).catch(() => {})
-}
-
-/**
- * ปิดการดัดแปลง Facebook CDN URL ชั่วคราว 
- * เพราะการเปลี่ยน path/query จะทำให้ signature (oh=...) พัง ส่งผลให้โหลดรูปไม่ได้ (403 Forbidden)
- */
-export function upscaleFacebookCdnUrl(url: string): string {
-  // ไม่ดัดแปลง URL ที่ถูก signed แล้ว
-  return url
-}
-
-/**
- * ปิดการดัดแปลง Instagram CDN URL ชั่วคราว
- */
-export function upscaleInstagramCdnUrl(url: string): string {
-  // ไม่ดัดแปลง URL ที่ถูก signed แล้ว
-  return url
 }
 
 /**

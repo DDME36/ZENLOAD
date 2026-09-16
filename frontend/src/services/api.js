@@ -117,14 +117,6 @@ export function getDirectDownloadUrl(jobId, token) {
 }
 
 /**
- * @deprecated ใช้ startDownload + getDirectDownloadUrl แทน
- */
-export function getDownloadUrl(url, optionId) {
-  const params = new URLSearchParams({ url, option: optionId })
-  return `${apiUrl('/download')}?${params.toString()}`
-}
-
-/**
  * เริ่มต้นการดาวน์โหลดแบบ Asynchronous (POST: จองคิวและรับ Access Token)
  */
 export async function startDownload(url, optionId, signal) {

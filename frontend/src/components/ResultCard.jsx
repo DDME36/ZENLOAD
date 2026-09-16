@@ -161,12 +161,12 @@ export default function ResultCard({ data, originalUrl, onNewSearch }) {
       jobIdRef.current = jobId
       tokenRef.current = accessToken
 
-      // 2. Fast Real-Time Poll (250ms) with Smooth Progress Progression
+      // 2. Real-Time Poll (500ms) with Smooth Progress Progression
       let completed = false
 
       while (!completed) {
         await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => { controller.signal.removeEventListener('abort', onAbort); resolve() }, 250)
+          const timeout = setTimeout(() => { controller.signal.removeEventListener('abort', onAbort); resolve() }, 500)
           const onAbort = () => {
             clearTimeout(timeout)
             reject(new DOMException('Aborted', 'AbortError'))
@@ -240,7 +240,11 @@ export default function ResultCard({ data, originalUrl, onNewSearch }) {
       }
       console.error('Download failed:', err)
       setDownloadStatus('error')
-      setDownloadError(err.message || 'เกิดปัญหาในการดาวน์โหลดไฟล์')
+      const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false
+      const errorMsg = isOffline
+        ? 'สัญญาณอินเทอร์เน็ตขาดหาย กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่อีกครั้ง'
+        : (err.message || 'เกิดปัญหาในการดาวน์โหลดไฟล์')
+      setDownloadError(errorMsg)
     }
   }
 
@@ -513,22 +517,30 @@ export default function ResultCard({ data, originalUrl, onNewSearch }) {
                     <Music size={15} /> เสียง (MP3 / M4A)
                   </h3>
                   <div className="result-card__actions">
-                    {audioOptions.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        className={`dl-btn dl-btn--audio ${downloading === option.id ? 'dl-btn--loading' : ''}`}
-                        onClick={() => handleDownload(option)}
-                        disabled={!!downloading}
-                      >
-                        {downloading === option.id ? (
-                          <Loader2 size={15} className="lucide-spin" />
-                        ) : (
-                          <Download size={15} />
-                        )}
-                        <span>{option.label}</span>
-                      </button>
-                    ))}
+                    {audioOptions.map((option) => {
+                      const isMp3 = option.format === 'mp3' || option.id === 'audio_mp3'
+                      const isM4a = option.format === 'm4a' || option.id === 'audio_m4a'
+                      const isWav = option.format === 'wav' || option.id === 'audio_wav'
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className={`dl-btn dl-btn--audio ${downloading === option.id ? 'dl-btn--loading' : ''}`}
+                          onClick={() => handleDownload(option)}
+                          disabled={!!downloading}
+                        >
+                          {downloading === option.id ? (
+                            <Loader2 size={15} className="lucide-spin" />
+                          ) : (
+                            <Download size={15} />
+                          )}
+                          <span>{option.label}</span>
+                          {isMp3 && <span className="dl-btn__badge dl-btn__badge--recommended">แนะนำ · ทั่วไป</span>}
+                          {isM4a && <span className="dl-btn__badge dl-btn__badge--aac">ไฟล์เล็ก · iOS</span>}
+                          {isWav && <span className="dl-btn__badge dl-btn__badge--lossless">Lossless</span>}
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
               )}

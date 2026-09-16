@@ -1,12 +1,12 @@
 @echo off
-title Zentyr Fetch
+title Zenload (Production)
 echo ===================================================
-echo           Starting Zentyr Fetch (Production)
+echo           Starting Zenload (Production)
 echo ===================================================
 echo.
 cd /d "%~dp0backend"
 set NODE_ENV=production
 timeout /t 1 /nobreak >nul
-start "" http://localhost:3001
+start "" http://localhost:3001/zenload/
 bun run src/index.ts
 pause

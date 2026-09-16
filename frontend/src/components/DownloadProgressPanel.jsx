@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { CheckCircle2, AlertTriangle, Share2, RotateCcw, Clock, X, Loader2, Download, ExternalLink, FileUp } from 'lucide-react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { CheckCircle2, AlertTriangle, Share2, RotateCcw, Clock, X, Loader2, Download, ExternalLink, FileUp, Copy, Check } from 'lucide-react'
 import { isIOSPWA } from '../utils/device'
 import { resolveBackendUrl } from '../services/api'
 
@@ -22,6 +22,34 @@ export default function DownloadProgressPanel({
   const [visualProgress, setVisualProgress] = useState(0)
   const [iosPwa, setIosPwa] = useState(false)
   const [isSharing, setIsSharing] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const handleCopyLink = useCallback(async () => {
+    if (!lastDownloadedUrl) return
+    const fullUrl = resolveBackendUrl(lastDownloadedUrl)
+    const shareableUrl = fullUrl.startsWith('http')
+      ? fullUrl
+      : `${typeof window !== 'undefined' ? window.location.origin : ''}${fullUrl}`
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareableUrl)
+      } else {
+        const textarea = document.createElement('textarea')
+        textarea.value = shareableUrl
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+      }
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2200)
+    } catch {
+      setCopied(false)
+    }
+  }, [lastDownloadedUrl])
 
   useEffect(() => {
     setIosPwa(isIOSPWA())
@@ -134,6 +162,18 @@ export default function DownloadProgressPanel({
                 )}
 
                 {lastDownloadedUrl && (
+                  <button
+                    type="button"
+                    className="dl-btn dl-btn--ghost dl-btn--sm"
+                    onClick={handleCopyLink}
+                    title="คัดลอกลิงก์สำหรับส่งต่อหรือดาวน์โหลด"
+                  >
+                    {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+                    <span>{copied ? 'คัดลอกแล้ว!' : 'คัดลอกลิงก์'}</span>
+                  </button>
+                )}
+
+                {lastDownloadedUrl && (
                   <a
                     href={resolveBackendUrl(lastDownloadedUrl)}
                     target="_blank"
@@ -156,10 +196,21 @@ export default function DownloadProgressPanel({
                   <Download size={16} /> กดบันทึก / ดาวน์โหลดไฟล์
                 </a>
               )}
+              {lastDownloadedUrl && (
+                <button
+                  type="button"
+                  className="dl-btn dl-btn--secondary"
+                  onClick={handleCopyLink}
+                  title="คัดลอกลิงก์สำหรับส่งต่อหรือดาวน์โหลด"
+                >
+                  {copied ? <Check size={15} className="text-success" /> : <Copy size={15} />}
+                  <span>{copied ? 'คัดลอกลิงก์สำเร็จ!' : 'คัดลอกลิงก์ไฟล์'}</span>
+                </button>
+              )}
               {onShare && (
                 <button
                   type="button"
-                  className={`dl-btn ${lastDownloadedUrl ? 'dl-btn--secondary' : 'dl-btn--primary'}`}
+                  className="dl-btn dl-btn--secondary"
                   onClick={onShare}
                 >
                   <Share2 size={15} /> บันทึกลงเครื่อง / แชร์ (มือถือ)

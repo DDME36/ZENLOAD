@@ -1,13 +1,13 @@
 {
-  "name": "zentyr-fetch",
+  "name": "zenload",
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"cd backend && bun run dev\" \"cd frontend && npm run dev\"",
+    "dev": "concurrently \"cd backend && bun run dev\" \"cd frontend && bun run dev\"",
     "dev:backend": "cd backend && bun run dev",
-    "dev:frontend": "cd frontend && npm run dev",
-    "build:frontend": "cd frontend && npm run build",
-    "install:all": "cd backend && bun install && cd ../frontend && npm install",
+    "dev:frontend": "cd frontend && bun run dev",
+    "build:frontend": "cd frontend && bun run build",
+    "install:all": "cd backend && bun install && cd ../frontend && bun install",
     "test": "cd backend && bun test"
   },
   "devDependencies": {

@@ -1,11 +1,13 @@
 import React, { memo } from 'react'
-import { AlertCircle, Lock, Clock, SearchX, Link2Off, X, Lightbulb } from 'lucide-react'
+import { AlertCircle, Lock, Clock, SearchX, Link2Off, X, Lightbulb, WifiOff } from 'lucide-react'
 
 function ErrorAlert({ error, onClose }) {
   if (!error) return null
 
   const getErrorIcon = (code) => {
     switch (code) {
+      case 'OFFLINE':
+        return <WifiOff size={18} className="text-warning" aria-hidden="true" />
       case 'AUTH_REQUIRED':
       case 'PRIVATE_CONTENT':
         return <Lock size={18} className="text-warning" aria-hidden="true" />
@@ -22,7 +24,9 @@ function ErrorAlert({ error, onClose }) {
   }
 
   const title =
-    error.code === 'AUTH_REQUIRED'
+    error.code === 'OFFLINE'
+      ? 'สัญญาณอินเทอร์เน็ตขาดหาย'
+      : error.code === 'AUTH_REQUIRED'
       ? 'เนื้อหานี้ต้องเข้าสู่ระบบหรือเป็นส่วนตัว'
       : error.code === 'RATE_LIMITED'
       ? 'คำขอถี่เกินไปชั่วคราว'

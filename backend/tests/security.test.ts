@@ -4,6 +4,7 @@ import {
   isInternalHostname,
   parseAndValidateUrl,
   isAllowedImageProxyHost,
+  isSafeSubpath,
 } from '../src/utils/security'
 
 describe('SSRF & IP Security Tests', () => {
@@ -72,5 +73,16 @@ describe('SSRF & IP Security Tests', () => {
     expect(isAllowedImageProxyHost('instagram.com')).toBe(true)
     expect(isAllowedImageProxyHost('i.ytimg.com')).toBe(true)
     expect(isAllowedImageProxyHost('evil-attacker.com')).toBe(false)
+  })
+
+  it('should prevent path traversal via isSafeSubpath', () => {
+    const base = process.platform === 'win32' ? 'C:\\temp\\jobs' : '/tmp/jobs'
+    const safeSub = process.platform === 'win32' ? 'C:\\temp\\jobs\\job123\\file.mp4' : '/tmp/jobs/job123/file.mp4'
+    const traversal = process.platform === 'win32' ? 'C:\\temp\\jobs\\..\\secret.txt' : '/tmp/jobs/../secret.txt'
+    const unrelated = process.platform === 'win32' ? 'C:\\Windows\\System32' : '/etc/passwd'
+
+    expect(isSafeSubpath(base, safeSub)).toBe(true)
+    expect(isSafeSubpath(base, traversal)).toBe(false)
+    expect(isSafeSubpath(base, unrelated)).toBe(false)
   })
 })

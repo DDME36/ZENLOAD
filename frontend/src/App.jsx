@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
 import Header from './components/Header'
 import SmartInput from './components/SmartInput'
 import ResultCard from './components/ResultCard'
 import SkeletonState from './components/SkeletonState'
 import ErrorAlert from './components/ErrorAlert'
 import BentoPlatforms from './components/BentoPlatforms'
-import HistoryList from './components/HistoryList'
 import { useFetch } from './hooks/useFetch'
 import { checkHealth } from './services/api'
+
+const HistoryList = lazy(() => import('./components/HistoryList'))
 
 export default function App() {
   const { data, loading, error, analyze, reset } = useFetch()
@@ -121,12 +122,14 @@ export default function App() {
         {/* ซ่อน Bento Grid & History เมื่อมีผลลัพธ์หรืออยู่ระหว่างโหลดข้อมูล */}
         {!loading && !data && (
           <>
-            <HistoryList
-              history={history}
-              onSelect={handleSelectHistory}
-              onRemove={handleRemoveHistory}
-              onClearAll={handleClearAllHistory}
-            />
+            <Suspense fallback={null}>
+              <HistoryList
+                history={history}
+                onSelect={handleSelectHistory}
+                onRemove={handleRemoveHistory}
+                onClearAll={handleClearAllHistory}
+              />
+            </Suspense>
             <BentoPlatforms />
           </>
         )}

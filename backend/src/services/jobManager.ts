@@ -28,15 +28,40 @@ export interface JobRecord {
 
 let db: Database
 
+// Cache prepared statements to eliminate parsing overhead and allocation churn
+let getJobStmt: ReturnType<Database['prepare']> | undefined
+let insertJobStmt: ReturnType<Database['prepare']> | undefined
+let setDownloadingStmt: ReturnType<Database['prepare']> | undefined
+let updateProgressWithStageStmt: ReturnType<Database['prepare']> | undefined
+let updateProgressOnlyStmt: ReturnType<Database['prepare']> | undefined
+let completeJobStmt: ReturnType<Database['prepare']> | undefined
+let failJobStmt: ReturnType<Database['prepare']> | undefined
+let abortJobStmt: ReturnType<Database['prepare']> | undefined
+let deleteJobStmt: ReturnType<Database['prepare']> | undefined
+let getExpiredJobsQuery: { all: (expiresBefore: number) => JobRecord[] } | undefined
+let getActiveJobIdsQuery: { all: () => { id: string }[] } | undefined
+
 // เก็บ Controller สำหรับการ Cancel แบบ Real-time
 const activeControllers = new Map<string, AbortController>()
+
+/**
+ * ทำความสะอาด Job ID ป้องกัน Path Traversal หรือการแทรกอักขระแปลกปลอม
+ */
+export function sanitizeJobId(jobId: string): string {
+  if (!jobId || typeof jobId !== 'string') return ''
+  return jobId.replace(/[^a-zA-Z0-9_-]/g, '')
+}
 
 /**
  * โฟลเดอร์แยกสำหรับแต่ละงาน (Per-job directory)
  */
 export function getJobDir(jobId: string): string {
+  const safeId = sanitizeJobId(jobId)
+  if (!safeId) {
+    throw new AppError('INVALID_INPUT', 'รหัสงานไม่ถูกต้อง (Invalid Job ID)', 400)
+  }
   const tempDir = getTempDir()
-  return join(tempDir, 'jobs', jobId)
+  return join(tempDir, 'jobs', safeId)
 }
 
 export async function ensureJobDir(jobId: string): Promise<string> {
@@ -99,6 +124,58 @@ export async function initJobManager(): Promise<void> {
 
   log('info', `SQLite Job Database initialized at: ${dbPath}`)
 
+  // Precompile prepared statements
+  getJobStmt = db.prepare('SELECT * FROM jobs WHERE id = ?')
+  insertJobStmt = db.prepare(`
+    INSERT INTO jobs (
+      id, access_token, url, option_id, platform, identifier,
+      status, stage, progress, created_at, updated_at, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'queued', 'queued', 0, ?, ?, ?)
+  `)
+  setDownloadingStmt = db.prepare(`
+    UPDATE jobs 
+    SET status = 'downloading', stage = 'downloading', updated_at = ? 
+    WHERE id = ? AND status = 'queued'
+  `)
+  updateProgressWithStageStmt = db.prepare(`
+    UPDATE jobs 
+    SET progress = MAX(progress, ?), stage = ?, updated_at = ? 
+    WHERE id = ? AND status = 'downloading'
+  `)
+  updateProgressOnlyStmt = db.prepare(`
+    UPDATE jobs 
+    SET progress = MAX(progress, ?), updated_at = ? 
+    WHERE id = ? AND status = 'downloading'
+  `)
+  completeJobStmt = db.prepare(`
+    UPDATE jobs 
+    SET status = 'completed', 
+        stage = 'ready',
+        progress = 100, 
+        file_path = ?, 
+        filename = ?, 
+        content_type = ?, 
+        file_size = ?, 
+        updated_at = ?, 
+        expires_at = ?
+    WHERE id = ?
+  `)
+  failJobStmt = db.prepare(`
+    UPDATE jobs 
+    SET status = 'failed', error = ?, updated_at = ? 
+    WHERE id = ?
+  `)
+  abortJobStmt = db.prepare(`
+    UPDATE jobs 
+    SET status = 'aborted', updated_at = ? 
+    WHERE id = ?
+  `)
+  deleteJobStmt = db.prepare('DELETE FROM jobs WHERE id = ?')
+  getExpiredJobsQuery = db.query<JobRecord, [number]>('SELECT * FROM jobs WHERE expires_at < ?')
+  getActiveJobIdsQuery = db.query<{ id: string }, []>(
+    "SELECT id FROM jobs WHERE status IN ('completed', 'downloading', 'queued')"
+  )
+
   // ===== จัดการ Interrupted Jobs หลังเซิร์ฟเวอร์ Restart =====
   const interrupted = db.query<JobRecord, []>(
     "SELECT * FROM jobs WHERE status IN ('queued', 'downloading')"
@@ -151,14 +228,16 @@ export function createJob(params: {
   const abortController = new AbortController()
   activeControllers.set(jobId, abortController)
 
-  const stmt = db.prepare(`
-    INSERT INTO jobs (
-      id, access_token, url, option_id, platform, identifier,
-      status, stage, progress, created_at, updated_at, expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 'queued', 'queued', 0, ?, ?, ?)
-  `)
+  if (!insertJobStmt) {
+    insertJobStmt = db.prepare(`
+      INSERT INTO jobs (
+        id, access_token, url, option_id, platform, identifier,
+        status, stage, progress, created_at, updated_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'queued', 'queued', 0, ?, ?, ?)
+    `)
+  }
 
-  stmt.run(
+  insertJobStmt.run(
     jobId,
     accessToken,
     params.url,
@@ -177,15 +256,26 @@ export function createJob(params: {
  * ดึงข้อมูล Job
  */
 export function getJob(jobId: string): JobRecord | null {
-  const stmt = db.prepare('SELECT * FROM jobs WHERE id = ?')
-  return (stmt.get(jobId) as JobRecord) || null
+  const safeId = sanitizeJobId(jobId)
+  if (!safeId) return null
+
+  if (!getJobStmt) {
+    if (!db) return null
+    getJobStmt = db.prepare('SELECT * FROM jobs WHERE id = ?')
+  }
+  return (getJobStmt.get(safeId) as JobRecord) || null
 }
 
 /**
  * ตรวจสอบความถูกต้องและสิทธิ์การเข้าถึง Job ด้วย Access Token
  */
 export function verifyJobOwnership(jobId: string, token?: string): JobRecord {
-  const job = getJob(jobId)
+  const safeId = sanitizeJobId(jobId)
+  if (!safeId) {
+    throw new AppError('INVALID_INPUT', 'รหัสงานไม่ถูกต้อง', 400)
+  }
+
+  const job = getJob(safeId)
   if (!job) {
     throw new AppError('JOB_NOT_FOUND', 'ไม่พบงานดาวน์โหลดนี้', 404)
   }
@@ -201,32 +291,47 @@ export function verifyJobOwnership(jobId: string, token?: string): JobRecord {
  * อัปเดตสถานะเป็น downloading
  */
 export function setJobDownloading(jobId: string): void {
-  const stmt = db.prepare(`
-    UPDATE jobs 
-    SET status = 'downloading', stage = 'downloading', updated_at = ? 
-    WHERE id = ? AND status = 'queued'
-  `)
-  stmt.run(Date.now(), jobId)
+  const safeId = sanitizeJobId(jobId)
+  if (!safeId) return
+
+  if (!setDownloadingStmt) {
+    setDownloadingStmt = db.prepare(`
+      UPDATE jobs 
+      SET status = 'downloading', stage = 'downloading', updated_at = ? 
+      WHERE id = ? AND status = 'queued'
+    `)
+  }
+  setDownloadingStmt.run(Date.now(), safeId)
 }
 
 /**
  * อัปเดตความคืบหน้า (0-100) และ Stage
  */
 export function updateJobProgress(jobId: string, progress: number, stage?: DownloadStage): void {
+  const safeId = sanitizeJobId(jobId)
+  if (!safeId) return
+
+  const clampedProgress = Math.min(Math.max(progress, 0), 100)
+  const now = Date.now()
+
   if (stage) {
-    const stmt = db.prepare(`
-      UPDATE jobs 
-      SET progress = MAX(progress, ?), stage = ?, updated_at = ? 
-      WHERE id = ? AND status = 'downloading'
-    `)
-    stmt.run(Math.min(Math.max(progress, 0), 100), stage, Date.now(), jobId)
+    if (!updateProgressWithStageStmt) {
+      updateProgressWithStageStmt = db.prepare(`
+        UPDATE jobs 
+        SET progress = MAX(progress, ?), stage = ?, updated_at = ? 
+        WHERE id = ? AND status = 'downloading'
+      `)
+    }
+    updateProgressWithStageStmt.run(clampedProgress, stage, now, safeId)
   } else {
-    const stmt = db.prepare(`
-      UPDATE jobs 
-      SET progress = MAX(progress, ?), updated_at = ? 
-      WHERE id = ? AND status = 'downloading'
-    `)
-    stmt.run(Math.min(Math.max(progress, 0), 100), Date.now(), jobId)
+    if (!updateProgressOnlyStmt) {
+      updateProgressOnlyStmt = db.prepare(`
+        UPDATE jobs 
+        SET progress = MAX(progress, ?), updated_at = ? 
+        WHERE id = ? AND status = 'downloading'
+      `)
+    }
+    updateProgressOnlyStmt.run(clampedProgress, now, safeId)
   }
 }
 
@@ -240,58 +345,71 @@ export function completeJob(
   contentType: string,
   fileSize: number
 ): void {
-  activeControllers.delete(jobId)
+  const safeId = sanitizeJobId(jobId)
+  if (!safeId) return
+
+  activeControllers.delete(safeId)
 
   const now = Date.now()
   const expiresAt = now + 1800000 // 30 นาที สำหรับดาวน์โหลด / โหลดซ้ำ / resume
 
-  const stmt = db.prepare(`
-    UPDATE jobs 
-    SET status = 'completed', 
-        stage = 'ready',
-        progress = 100, 
-        file_path = ?, 
-        filename = ?, 
-        content_type = ?, 
-        file_size = ?, 
-        updated_at = ?, 
-        expires_at = ?
-    WHERE id = ?
-  `)
+  if (!completeJobStmt) {
+    completeJobStmt = db.prepare(`
+      UPDATE jobs 
+      SET status = 'completed', 
+          stage = 'ready',
+          progress = 100, 
+          file_path = ?, 
+          filename = ?, 
+          content_type = ?, 
+          file_size = ?, 
+          updated_at = ?, 
+          expires_at = ?
+      WHERE id = ?
+    `)
+  }
 
-  stmt.run(filePath, filename, contentType, fileSize, now, expiresAt, jobId)
+  completeJobStmt.run(filePath, filename, contentType, fileSize, now, expiresAt, safeId)
 }
 
 /**
  * อัปเดตเมื่องานล้มเหลว
  */
 export function failJob(jobId: string, error: string): void {
-  activeControllers.delete(jobId)
+  const safeId = sanitizeJobId(jobId)
+  if (!safeId) return
 
-  const stmt = db.prepare(`
-    UPDATE jobs 
-    SET status = 'failed', error = ?, updated_at = ? 
-    WHERE id = ?
-  `)
-  stmt.run(error, Date.now(), jobId)
+  activeControllers.delete(safeId)
+
+  if (!failJobStmt) {
+    failJobStmt = db.prepare(`
+      UPDATE jobs 
+      SET status = 'failed', error = ?, updated_at = ? 
+      WHERE id = ?
+    `)
+  }
+  failJobStmt.run(error, Date.now(), safeId)
 }
 
 /**
  * ยกเลิกงาน (Abort) พร้อมส่งสัญญาณยกเลิกไปยัง AbortController และลบโฟลเดอร์งานทันที
  */
 export async function abortJob(jobId: string): Promise<void> {
-  const job = getJob(jobId)
+  const safeId = sanitizeJobId(jobId)
+  if (!safeId) return
+
+  const job = getJob(safeId)
   if (!job) return
 
   // 1. สั่ง abort controller (ซึ่งจะส่งสัญญาณยุติการทำงานไปยัง Process Tree)
-  const controller = activeControllers.get(jobId)
+  const controller = activeControllers.get(safeId)
   if (controller) {
     controller.abort()
-    activeControllers.delete(jobId)
+    activeControllers.delete(safeId)
   }
 
   // 2. ลบโฟลเดอร์ของ Job นี้ทิ้งอย่างสมบูรณ์
-  await removeJobDir(jobId)
+  await removeJobDir(safeId)
 
   // 3. ลบไฟล์ที่เกี่ยวข้อง (ถ้ามีระบุไว้)
   if (job.file_path) {
@@ -300,13 +418,15 @@ export async function abortJob(jobId: string): Promise<void> {
   }
 
   // 4. บันทึกสถานะว่า aborted
-  const stmt = db.prepare(`
-    UPDATE jobs 
-    SET status = 'aborted', updated_at = ? 
-    WHERE id = ?
-  `)
-  stmt.run(Date.now(), jobId)
-  log('info', `Job ${jobId} successfully aborted and cleaned.`)
+  if (!abortJobStmt) {
+    abortJobStmt = db.prepare(`
+      UPDATE jobs 
+      SET status = 'aborted', updated_at = ? 
+      WHERE id = ?
+    `)
+  }
+  abortJobStmt.run(Date.now(), safeId)
+  log('info', `Job ${safeId} successfully aborted and cleaned.`)
 }
 
 /**
@@ -314,14 +434,17 @@ export async function abortJob(jobId: string): Promise<void> {
  */
 export async function cleanupExpiredJobs(): Promise<void> {
   const now = Date.now()
-  const expiredJobs = db.query<JobRecord, [number]>(
-    'SELECT * FROM jobs WHERE expires_at < ?'
-  ).all(now)
+  if (!getExpiredJobsQuery) {
+    getExpiredJobsQuery = db.query<JobRecord, [number]>('SELECT * FROM jobs WHERE expires_at < ?')
+  }
+  const expiredJobs = getExpiredJobsQuery.all(now)
 
   if (expiredJobs.length === 0) return
 
   log('info', `Cleaning up ${expiredJobs.length} expired jobs...`)
-  const deleteStmt = db.prepare('DELETE FROM jobs WHERE id = ?')
+  if (!deleteJobStmt) {
+    deleteJobStmt = db.prepare('DELETE FROM jobs WHERE id = ?')
+  }
 
   for (const job of expiredJobs) {
     await removeJobDir(job.id)
@@ -334,7 +457,7 @@ export async function cleanupExpiredJobs(): Promise<void> {
       } catch {}
       await cleanupPartialFiles(job.file_path)
     }
-    deleteStmt.run(job.id)
+    deleteJobStmt.run(job.id)
   }
 }
 
@@ -349,14 +472,18 @@ export async function cleanupOrphanFiles(): Promise<void> {
     const now = Date.now()
     const oneHourAgo = now - 3600000
 
-    const activeJobIds = new Set(
-      db.query<{ id: string }, []>(
+    if (!getActiveJobIdsQuery) {
+      getActiveJobIdsQuery = db.query<{ id: string }, []>(
         "SELECT id FROM jobs WHERE status IN ('completed', 'downloading', 'queued')"
-      ).all().map(r => r.id)
+      )
+    }
+    const activeJobIds = new Set(
+      getActiveJobIdsQuery.all().map(r => r.id)
     )
 
-    for (const jobId of entries) {
-      if (activeJobIds.has(jobId)) continue
+    for (const rawJobId of entries) {
+      const jobId = sanitizeJobId(rawJobId)
+      if (!jobId || activeJobIds.has(jobId)) continue
 
       const fullJobDir = join(jobsDir, jobId)
       try {

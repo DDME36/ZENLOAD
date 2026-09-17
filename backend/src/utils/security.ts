@@ -1,4 +1,5 @@
 import { lookup } from 'node:dns/promises'
+import { resolve, sep } from 'node:path'
 import { AppError } from './errors'
 import { getProxyForUrl } from './networkProxy'
 
@@ -311,4 +312,13 @@ const ALLOWED_IMAGE_PROXY_DOMAINS = [
 export function isAllowedImageProxyHost(hostname: string): boolean {
   const host = hostname.toLowerCase().trim().replace(/^\[|\]$/g, '')
   return ALLOWED_IMAGE_PROXY_DOMAINS.some(allowed => host === allowed || host.endsWith('.' + allowed))
+}
+
+/**
+ * ตรวจสอบว่า targetPath อยู่ภายใต้ baseDir หรือไม่ เพื่อป้องกัน Path Traversal
+ */
+export function isSafeSubpath(baseDir: string, targetPath: string): boolean {
+  const resolvedBase = resolve(baseDir)
+  const resolvedTarget = resolve(targetPath)
+  return resolvedTarget === resolvedBase || resolvedTarget.startsWith(resolvedBase.endsWith(sep) ? resolvedBase : resolvedBase + sep)
 }

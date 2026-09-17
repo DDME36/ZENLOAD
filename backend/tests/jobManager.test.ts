@@ -8,6 +8,7 @@ import {
   updateJobProgress,
   completeJob,
   abortJob,
+  sanitizeJobId,
 } from '../src/services/jobManager'
 import { CapacityGate, IpRateLimiter } from '../src/utils/limits'
 import { AppError } from '../src/utils/errors'
@@ -112,6 +113,12 @@ describe('SQLite Job Manager & Security Tests', () => {
     await abortJob(jobId)
     const job = getJob(jobId)
     expect(job?.status).toBe('aborted')
+  })
+
+  it('should sanitize job IDs and strip unsafe characters', () => {
+    expect(sanitizeJobId('../../etc/passwd')).toBe('etcpasswd')
+    expect(sanitizeJobId('safe_job-123')).toBe('safe_job-123')
+    expect(sanitizeJobId('job;rm -rf /')).toBe('jobrm-rf')
   })
 })
 

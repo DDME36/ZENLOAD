@@ -20,6 +20,7 @@ import {
   isAllowedImageProxyHost,
   assertSafePublicDestination,
   safeFetch,
+  isSafeSubpath,
 } from './utils/security'
 import {
   analyzeCapacity,
@@ -166,9 +167,23 @@ async function runDownloadJob(
   } catch (error) {
     if (timeoutTimer) clearTimeout(timeoutTimer)
     if (!signal.aborted) {
-      const errorMsg = error instanceof Error ? error.message : String(error)
+      let clientMsg = 'การประมวลผลไฟล์ดาวน์โหลดขัดข้อง กรุณาลองใหม่อีกครั้ง'
+      if (error instanceof AppError) {
+        clientMsg = error.message
+      } else if (error instanceof Error) {
+        const raw = error.message
+        if (raw.includes('Private video') || raw.includes('This video is private')) {
+          clientMsg = 'วิดีโอนี้ถูกตั้งค่าเป็นส่วนตัว ไม่สามารถดาวน์โหลดได้'
+        } else if (raw.includes('Sign in') || raw.includes('confirm you’re not a bot')) {
+          clientMsg = 'จำเป็นต้องใช้สิทธิ์การเข้าสู่ระบบ หรือติดการยืนยันตัวตนจากแพลตฟอร์มต้นทาง'
+        } else if (raw.includes('Geo-restricted') || raw.includes('not available in your country')) {
+          clientMsg = 'เนื้อหานี้ถูกจำกัดการเข้าถึงเฉพาะบางประเทศ'
+        } else if (raw.includes('Copyright') || raw.includes('blocked')) {
+          clientMsg = 'เนื้อหานี้ถูกระงับเนื่องจากลิขสิทธิ์'
+        }
+      }
+      failJob(jobId, clientMsg)
       const errorStack = error instanceof Error ? (error.stack || error.message) : String(error)
-      failJob(jobId, errorMsg)
       log('error', `Job ${jobId} failed: ${errorStack}`)
     }
   } finally {
@@ -616,6 +631,11 @@ export const app = new Elysia()
         if (job.status !== 'completed' || !job.file_path) {
           set.status = 400
           return { success: false, error: { code: 'JOB_NOT_READY', message: 'ไฟล์ดาวน์โหลดยังไม่พร้อมใช้งาน' } }
+        }
+
+        if (!isSafeSubpath(getTempDir(), job.file_path)) {
+          set.status = 403
+          return { success: false, error: { code: 'FORBIDDEN', message: 'ไม่อนุญาตให้เข้าถึงไฟล์นอกโฟลเดอร์ดาวน์โหลด' } }
         }
 
         const file = Bun.file(job.file_path)

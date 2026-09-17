@@ -49,6 +49,9 @@ export async function killProcessTree(proc: { pid: number; exited?: Promise<numb
           proc.kill('SIGTERM')
         } catch {}
       }
+      try {
+        Bun.spawn(['pkill', '-TERM', '-P', String(pid)], { stdout: 'ignore', stderr: 'ignore' })
+      } catch {}
 
       const exitedGracefully = await waitForExit(1500)
 
@@ -59,6 +62,9 @@ export async function killProcessTree(proc: { pid: number; exited?: Promise<numb
         } catch {
           try { proc.kill('SIGKILL') } catch {}
         }
+        try {
+          Bun.spawn(['pkill', '-KILL', '-P', String(pid)], { stdout: 'ignore', stderr: 'ignore' })
+        } catch {}
         await waitForExit(1000)
       }
     }

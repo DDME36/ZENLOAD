@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import {
   startDownload,
   getDownloadStatus,
@@ -27,9 +27,10 @@ import {
   Sparkles,
 } from 'lucide-react'
 import DownloadProgressPanel from './DownloadProgressPanel'
-import MobileShareModal from './MobileShareModal'
 import AlbumGallery from './AlbumGallery'
 import SmartThumbnail from './SmartThumbnail'
+
+const MobileShareModal = lazy(() => import('./MobileShareModal'))
 
 const PLATFORM_CONFIG = {
   youtube: { label: 'YouTube', icon: Youtube, color: '#ef4444' },
@@ -45,7 +46,7 @@ const PLATFORM_CONFIG = {
   direct: { label: 'Direct Media', icon: Film, color: '#10b981' },
 }
 
-export default function ResultCard({ data, originalUrl, onNewSearch }) {
+function ResultCard({ data, originalUrl, onNewSearch }) {
   const [downloading, setDownloading] = useState(null)
   const [activeOption, setActiveOption] = useState(null)
   const [downloadProgress, setDownloadProgress] = useState(0)
@@ -107,7 +108,7 @@ export default function ResultCard({ data, originalUrl, onNewSearch }) {
     }
   }, [downloadStatus])
 
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current)
       timerRef.current = null
@@ -121,9 +122,9 @@ export default function ResultCard({ data, originalUrl, onNewSearch }) {
     setDownloadError('')
     jobIdRef.current = null
     tokenRef.current = null
-  }
+  }, [])
 
-  const handleCancel = async () => {
+  const handleCancel = useCallback(async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
       abortControllerRef.current = null
@@ -132,7 +133,7 @@ export default function ResultCard({ data, originalUrl, onNewSearch }) {
       await cancelDownload(jobIdRef.current, tokenRef.current)
     }
     handleReset()
-  }
+  }, [handleReset])
 
   const handleDownload = async (option) => {
     setActiveOption(option)
@@ -248,20 +249,20 @@ export default function ResultCard({ data, originalUrl, onNewSearch }) {
     }
   }
 
-  // แยกกลุ่ม options
-  const options = data.options || []
-  const videoOptions = options.filter(
+  // แยกกลุ่ม options ด้วย useMemo เพื่อลดการคำนวณซ้ำซ้อนในทุก Render
+  const options = useMemo(() => data?.options || [], [data?.options])
+  const videoOptions = useMemo(() => options.filter(
     (opt) => opt.id.includes('video') || opt.format === 'mp4' || opt.format === 'mkv' || opt.format === 'webm'
-  )
-  const audioOptions = options.filter(
+  ), [options])
+  const audioOptions = useMemo(() => options.filter(
     (opt) => opt.id.includes('audio') || opt.format === 'mp3' || opt.format === 'm4a' || opt.format === 'wav'
-  )
-  const imageOptions = options.filter(
+  ), [options])
+  const imageOptions = useMemo(() => options.filter(
     (opt) => opt.id.includes('profile') || opt.format === 'jpg' || opt.format === 'png' || opt.format === 'webp'
-  )
+  ), [options])
 
-  const isAlbum = data.contentType === 'album' || (data.items && data.items.length > 1)
-  const totalOptions = [...videoOptions, ...audioOptions, ...imageOptions]
+  const isAlbum = useMemo(() => data.contentType === 'album' || (data.items && data.items.length > 1), [data.contentType, data.items])
+  const totalOptions = useMemo(() => [...videoOptions, ...audioOptions, ...imageOptions], [videoOptions, audioOptions, imageOptions])
   const isSingleOption = totalOptions.length === 1 && !isAlbum
   const singleOption = totalOptions[0]
   const isAudioOnly = data.contentType === 'audio' || (audioOptions.length > 0 && videoOptions.length === 0)
@@ -282,14 +283,16 @@ export default function ResultCard({ data, originalUrl, onNewSearch }) {
       role="region"
       aria-label="ผลลัพธ์การวิเคราะห์"
     >
-      {/* Mobile Save / iOS Safari Modal */}
-      <MobileShareModal
-        isOpen={showShareModal}
-        onClose={() => setShowShareModal(false)}
-        downloadUrl={lastDownloadedUrl}
-        title={data.title}
-        filename={lastDownloadedFilename}
-      />
+      {/* Mobile Save / iOS Safari Modal (Lazy loaded with Suspense) */}
+      <Suspense fallback={null}>
+        <MobileShareModal
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          downloadUrl={lastDownloadedUrl}
+          title={data.title}
+          filename={lastDownloadedFilename}
+        />
+      </Suspense>
 
       {/* Multi-Item Album Gallery View */}
       {isAlbum ? (
@@ -579,5 +582,7 @@ export default function ResultCard({ data, originalUrl, onNewSearch }) {
     </div>
   )
 }
+
+export default React.memo(ResultCard)
 
 

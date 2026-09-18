@@ -102,10 +102,14 @@ export function detectUrl(url: string): DetectedUrl {
       contentType = 'profile'
     }
 
+    const canonicalUrl = parts[0] === 'share' && identifier
+      ? `https://www.instagram.com/${contentType === 'reel' ? 'reel' : 'p'}/${identifier.trim()}/`
+      : parsed.href
+
     return {
       platform: 'instagram',
       contentType,
-      originalUrl: parsed.href,
+      originalUrl: canonicalUrl,
       identifier: identifier.trim(),
     }
   }

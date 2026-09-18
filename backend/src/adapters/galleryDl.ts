@@ -135,7 +135,8 @@ export class GalleryDlAdapter implements DownloaderAdapter {
     const proxy = getProxyForUrl(targetUrl)
     const proxyArgs = proxy !== undefined ? ['--proxy', proxy] : []
 
-    const proc = Bun.spawn([...cmd, ...cookieArgs, ...proxyArgs, '-j', '--no-download', targetUrl], {
+    const uaArgs = ['--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36']
+    const proc = Bun.spawn([...cmd, ...uaArgs, ...cookieArgs, ...proxyArgs, '-j', '--no-download', targetUrl], {
       stdout: 'pipe',
       stderr: 'pipe',
     })

@@ -96,7 +96,8 @@ async function getInstagramAvatarViaGalleryDl(
     const cookieArgs = cookiesPath && (await Bun.file(cookiesPath).exists()) ? ['--cookies', cookiesPath] : []
 
     const avatarUrl = `https://www.instagram.com/${username}/avatar/`
-    const proc = Bun.spawn([...cmd, ...cookieArgs, '-j', avatarUrl], {
+    const uaArgs = ['--user-agent', DESKTOP_CHROME_UA]
+    const proc = Bun.spawn([...cmd, ...uaArgs, ...cookieArgs, '-j', avatarUrl], {
       stdout: 'pipe',
       stderr: 'pipe',
     })
@@ -173,12 +174,56 @@ async function getInstagramAvatarViaGalleryDl(
   return null
 }
 
+/**
+ * คลี่ลิงก์แชร์ Instagram (/share/...) ให้กลายเป็น Canonical URL (/p/ID หรือ /reel/ID)
+ * ป้องกันปัญหา yt-dlp และ gallery-dl ไม่รองรับ share endpoint
+ */
+export async function unshortenInstagramShareUrl(url: string, signal?: AbortSignal): Promise<string> {
+  const isShareUrl = /instagram\.com\/share\//i.test(url)
+  if (!isShareUrl) return url
+
+  // 1. ถ้ามี /share/p/ID หรือ /share/reel/ID หรือ /share/r/ID อยู่ใน URL อยู่แล้ว ให้แปลงได้ทันทีไม่ต้อง fetch
+  const directMatch = url.match(/instagram\.com\/share\/(?:reel|r)\/([^/?#]+)/i)
+  if (directMatch && directMatch[1]) {
+    return `https://www.instagram.com/reel/${directMatch[1]}/`
+  }
+  const postMatch = url.match(/instagram\.com\/share\/p\/([^/?#]+)/i)
+  if (postMatch && postMatch[1]) {
+    return `https://www.instagram.com/p/${postMatch[1]}/`
+  }
+
+  // 2. ถ้าเป็น shortened token ให้ fetch เพื่อตาม redirect
+  try {
+    const igCookie = await getInstagramCookieHeader()
+    const resp = await safeFetch(url, {
+      headers: {
+        ...DESKTOP_CHROME_HEADERS,
+        ...(igCookie ? { 'Cookie': igCookie } : {}),
+      },
+      signal,
+    })
+
+    const finalUrl = resp.url || ''
+    if (finalUrl && (finalUrl.includes('/p/') || finalUrl.includes('/reel/') || finalUrl.includes('/reels/'))) {
+      const cleanUrl = finalUrl.split('?')[0]
+      log('info', `Instagram unshortener resolved ${url} -> ${cleanUrl}`)
+      return cleanUrl
+    }
+  } catch (err) {
+    log('warn', `Failed to unshorten Instagram share URL: ${(err as Error).message}`)
+  }
+
+  return url
+}
+
 export async function getInstagramInfo(
   url: string,
   identifier: string,
   contentType: ContentType = 'profile',
   signal?: AbortSignal
 ): Promise<MediaInfo> {
+  const resolvedUrl = await unshortenInstagramShareUrl(url, signal)
+
   // 1. Stories require authentication / are temporary
   if (contentType === 'story') {
     throw new AppError(
@@ -192,7 +237,7 @@ export async function getInstagramInfo(
   // 2. Reels & Posts -> Delegate to yt-dlp extractor
   if (contentType === 'reel' || contentType === 'post') {
     try {
-      const genericInfo = await getGenericInfo(url, 'instagram', signal)
+      const genericInfo = await getGenericInfo(resolvedUrl, 'instagram', signal)
       genericInfo.contentType = contentType
       return genericInfo
     } catch (err) {
@@ -495,9 +540,11 @@ export async function downloadInstagram(
   onProgress?: (progress: number, stage: DownloadStage) => void,
   cachedMeta?: MediaInfo
 ): Promise<DownloadResult> {
+  const resolvedUrl = await unshortenInstagramShareUrl(url, signal)
+
   // If it's a reel or post video, use generic downloader
   if ((contentType === 'reel' || contentType === 'post') && optionId !== 'profile_hd') {
-    return downloadGeneric(url, optionId || 'video_best', 'instagram', signal, onProgress, cachedMeta)
+    return downloadGeneric(resolvedUrl, optionId || 'video_best', 'instagram', signal, onProgress, cachedMeta)
   }
 
   let cleanUsername = (identifier || '').replace(/[/?#].*$/, '').trim()

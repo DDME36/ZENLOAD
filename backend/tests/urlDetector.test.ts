@@ -28,6 +28,16 @@ describe('URL Detector Tests', () => {
     const res3 = detectUrl('https://instagram.com/zentyr_user')
     expect(res3.platform).toBe('instagram')
     expect(res3.identifier).toBe('zentyr_user')
+
+    const res4 = detectUrl('https://www.instagram.com/share/p/C123456789/')
+    expect(res4.platform).toBe('instagram')
+    expect(res4.contentType).toBe('post')
+    expect(res4.originalUrl).toBe('https://www.instagram.com/p/C123456789/')
+
+    const res5 = detectUrl('https://www.instagram.com/share/reel/D987654321/')
+    expect(res5.platform).toBe('instagram')
+    expect(res5.contentType).toBe('reel')
+    expect(res5.originalUrl).toBe('https://www.instagram.com/reel/D987654321/')
   })
 
   it('should detect Facebook URLs correctly', () => {

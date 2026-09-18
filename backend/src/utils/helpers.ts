@@ -202,6 +202,36 @@ export function getYtDlpArgs(baseArgs: string[]): string[] {
   if (cookiesPath) {
     args.push('--cookies', cookiesPath)
   }
+
+  // ปรับแต่ง Headers ให้เนียนสมจริงเหมือน Chrome Desktop สำหรับ Meta (Facebook, Instagram) (ป้องกัน Bot Detection / ตรวจจับพฤติกรรมอัตโนมัติ)
+  const isFacebook = targetUrl && (/facebook\.com|fb\.watch/i.test(targetUrl))
+  const isInstagram = targetUrl && (/instagram\.com/i.test(targetUrl))
+  if ((isFacebook || isInstagram) && !args.includes('--user-agent')) {
+    args.push(
+      '--user-agent',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      '--referer',
+      isInstagram ? 'https://www.instagram.com/' : 'https://www.facebook.com/',
+      '--add-header',
+      'Accept-Language:th,en-US;q=0.9,en;q=0.8',
+      '--add-header',
+      'Sec-CH-UA:"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+      '--add-header',
+      'Sec-CH-UA-Mobile:?0',
+      '--add-header',
+      'Sec-CH-UA-Platform:"Windows"',
+      '--add-header',
+      'Sec-Fetch-Dest:document',
+      '--add-header',
+      'Sec-Fetch-Mode:navigate',
+      '--add-header',
+      'Sec-Fetch-Site:none',
+      '--add-header',
+      'Sec-Fetch-User:?1',
+      '--add-header',
+      'Upgrade-Insecure-Requests:1'
+    )
+  }
   
   return [binary, ...args]
 }

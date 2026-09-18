@@ -113,26 +113,90 @@ async function getFacebookCookie(): Promise<string> {
   return ''
 }
 
+/**
+ * คลี่ลิงก์แชร์ Facebook (/share/r/, /share/v/, fb.watch) ให้กลายเป็น URL มาตรฐาน (/watch/?v=ID)
+ * ป้องกันปัญหา Facebook redirect ไปยัง story.php แล้วติดหน้า Login Wall สำหรับบอท
+ */
+export async function unshortenFacebookShareUrl(url: string, signal?: AbortSignal): Promise<string> {
+  const isShareUrl = /facebook\.com\/share\/[rv]\/|fb\.watch\//i.test(url)
+  if (!isShareUrl) return url
+
+  try {
+    const fbCookie = await getFacebookCookie()
+    const resp = await safeFetch(url, {
+      headers: {
+        ...DESKTOP_CHROME_HEADERS,
+        ...(fbCookie ? { 'Cookie': fbCookie } : {}),
+      },
+      signal,
+    })
+
+    const finalUrl = resp.url || ''
+
+    // 1. ลองดึง ID วิดีโอ (ตัวเลข 10-25 หลัก) จาก URL ปลายทาง
+    const idMatch = finalUrl.match(/\/(\d{10,25})(?:\/|\?|$)/) || finalUrl.match(/[?&]v=(\d{10,25})/)
+    if (idMatch && idMatch[1]) {
+      log('info', `Facebook unshortener resolved ${url} -> video ID ${idMatch[1]}`)
+      return `https://www.facebook.com/watch/?v=${idMatch[1]}`
+    }
+
+    // 2. หากเป็น URL วิดีโอ/Reels ปลายทางโดยตรง
+    if (finalUrl && !finalUrl.includes('/login') && !finalUrl.includes('story.php') &&
+        (finalUrl.includes('/videos/') || finalUrl.includes('/reel/') || finalUrl.includes('/watch'))) {
+      log('info', `Facebook unshortener resolved ${url} -> ${finalUrl}`)
+      return finalUrl
+    }
+
+    // 3. อ่าน HTML เพื่อดึง Canonical URL หรือ og:url
+    if (resp.ok) {
+      const html = await resp.text()
+      const ogUrlMatch = html.match(/<meta\s+property=["']og:url["']\s+content=["']([^"']+)["']/i) ||
+                         html.match(/<link\s+rel=["']canonical["']\s+href=["']([^"']+)["']/i)
+      if (ogUrlMatch && ogUrlMatch[1]) {
+        const ogUrl = ogUrlMatch[1]
+        const ogIdMatch = ogUrl.match(/\/(\d{10,25})(?:\/|\?|$)/) || ogUrl.match(/[?&]v=(\d{10,25})/)
+        if (ogIdMatch && ogIdMatch[1]) {
+          log('info', `Facebook unshortener extracted canonical video ID ${ogIdMatch[1]} from HTML`)
+          return `https://www.facebook.com/watch/?v=${ogIdMatch[1]}`
+        }
+      }
+
+      // 4. ตรวจสอบ video_id ใน JSON payload ภายในหน้า
+      const videoIdMatch = html.match(/"video_id":"(\d{10,25})"/i) ||
+                           html.match(/"owning_profile":\{"__typename":"Video","id":"(\d{10,25})"/i)
+      if (videoIdMatch && videoIdMatch[1]) {
+        log('info', `Facebook unshortener found video_id ${videoIdMatch[1]} in JSON payload`)
+        return `https://www.facebook.com/watch/?v=${videoIdMatch[1]}`
+      }
+    }
+  } catch (err) {
+    log('warn', `Failed to unshorten Facebook share URL: ${(err as Error).message}`)
+  }
+
+  return url
+}
+
 export async function getFacebookInfo(
   url: string,
   identifier: string,
   contentType: ContentType = 'profile',
   signal?: AbortSignal
 ): Promise<MediaInfo> {
-  const isVideo = contentType === 'watch' || contentType === 'reel' || (contentType === 'video' && !url.includes('/share/')) ||
-    url.includes('/video') || url.includes('/watch') || url.includes('fb.watch') || url.includes('/reel') ||
-    url.includes('/share/v/') || url.includes('/share/r/')
+  const resolvedUrl = await unshortenFacebookShareUrl(url, signal)
+  const isVideo = contentType === 'watch' || contentType === 'reel' || (contentType === 'video' && !resolvedUrl.includes('/share/')) ||
+    resolvedUrl.includes('/video') || resolvedUrl.includes('/watch') || resolvedUrl.includes('fb.watch') || resolvedUrl.includes('/reel') ||
+    resolvedUrl.includes('/share/v/') || resolvedUrl.includes('/share/r/')
 
   // 1. Videos & Reels -> Delegate to yt-dlp extractor
   if (isVideo) {
     try {
-      const genericInfo = await getGenericInfo(url, 'facebook', signal)
+      const genericInfo = await getGenericInfo(resolvedUrl, 'facebook', signal)
       genericInfo.contentType = contentType === 'profile' ? 'video' : contentType
       return genericInfo
     } catch (err) {
       log('warn', `Facebook generic video extractor failed: ${(err as Error).message}`)
       // If it's explicitly a video or watch URL, don't fallback to scraping profile picture
-      if (contentType === 'watch' || contentType === 'reel' || url.includes('fb.watch')) {
+      if (contentType === 'watch' || contentType === 'reel' || resolvedUrl.includes('fb.watch') || resolvedUrl.includes('/watch') || resolvedUrl.includes('/reel')) {
         throw err
       }
     }
@@ -395,11 +459,13 @@ export async function downloadFacebook(
   onProgress?: (progress: number, stage: DownloadStage) => void,
   cachedMeta?: MediaInfo
 ): Promise<DownloadResult> {
+  const resolvedUrl = await unshortenFacebookShareUrl(url, signal)
   const isVideo = contentType === 'watch' || contentType === 'reel' || contentType === 'video' ||
-    url.includes('/video') || url.includes('/watch') || url.includes('fb.watch') || url.includes('/reel')
+    resolvedUrl.includes('/video') || resolvedUrl.includes('/watch') || resolvedUrl.includes('fb.watch') || resolvedUrl.includes('/reel') ||
+    resolvedUrl.includes('/share/v/') || resolvedUrl.includes('/share/r/')
 
   if (isVideo && optionId !== 'media_hd' && optionId !== 'profile_hd' && optionId !== 'cover_hd') {
-    return downloadGeneric(url, optionId || 'video_best', 'facebook', signal, onProgress, cachedMeta)
+    return downloadGeneric(resolvedUrl, optionId || 'video_best', 'facebook', signal, onProgress, cachedMeta)
   }
 
   let cleanId = (identifier || '').replace(/[/?#].*$/, '')
